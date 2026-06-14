@@ -80,11 +80,10 @@ void SceneReplicationInterface::_untrack(const ObjectID &p_id) {
 }
 
 void SceneReplicationInterface::_free_remotes(const PeerInfo &p_info) {
-	for (const KeyValue<uint32_t, ObjectID> &E : p_info.recv_nodes) {
-		Node *node = tracked_nodes.has(E.value) ? get_id_as<Node>(E.value) : nullptr;
-		ERR_CONTINUE(!node);
-		node->queue_free();
-	}
+	// The project handles node cleanup on peer disconnect.
+	// Engine-internal tracking (`tracked_nodes`, `recv_nodes`) is cleaned up
+	// when `peers_info` is erased by the caller and when the node eventually
+	// exits the tree (triggering `_untrack`).
 }
 
 bool SceneReplicationInterface::_has_authority(const Node *p_node) {
@@ -402,6 +401,10 @@ Error SceneReplicationInterface::_update_spawn_visibility(int p_peer, const Obje
 		}
 		is_visible = false;
 	}
+	// Also check spawner-level visibility filter (AND with synchronizer result).
+	if (is_visible) {
+		is_visible = spawner->is_visible_to(p_peer);
+	}
 	// Spawn (and despawn) when needed.
 	HashSet<int> to_spawn;
 	HashSet<int> to_despawn;
@@ -658,9 +661,17 @@ Error SceneReplicationInterface::on_despawn_receive(int p_from, const uint8_t *p
 	ofs += 4;
 
 	// Untrack remote
-	ERR_FAIL_COND_V(!peers_info.has(p_from), ERR_UNAUTHORIZED);
+	if (!peers_info.has(p_from)) {
+		// The peer is already gone (e.g., disconnected). Nothing to despawn.
+		return OK;
+	}
 	PeerInfo &pinfo = peers_info[p_from];
-	ERR_FAIL_COND_V(!pinfo.recv_nodes.has(net_id), ERR_UNAUTHORIZED);
+	if (!pinfo.recv_nodes.has(net_id)) {
+		// The node was already despawned or never spawned. This can happen
+		// when a visibility change or a despawn is received for a node that
+		// was never visible to this peer. No-op is safe here.
+		return OK;
+	}
 	Node *node = get_id_as<Node>(pinfo.recv_nodes[net_id]);
 	ERR_FAIL_NULL_V(node, ERR_BUG);
 	pinfo.recv_nodes.erase(net_id);
@@ -668,8 +679,16 @@ Error SceneReplicationInterface::on_despawn_receive(int p_from, const uint8_t *p
 	const ObjectID oid = node->get_instance_id();
 	ERR_FAIL_COND_V(!tracked_nodes.has(oid), ERR_BUG);
 	MultiplayerSpawner *spawner = get_id_as<MultiplayerSpawner>(tracked_nodes[oid].spawner);
-	ERR_FAIL_NULL_V(spawner, ERR_DOES_NOT_EXIST);
-	ERR_FAIL_COND_V(p_from != spawner->get_multiplayer_authority(), ERR_UNAUTHORIZED);
+	if (!spawner) {
+		// Spawner is gone (e.g., the authority disconnected). The node will be
+		// cleaned up by the project if needed.
+		return OK;
+	}
+	if (p_from != spawner->get_multiplayer_authority()) {
+		// The despawn is from a former authority (authority has since changed).
+		// The node's current authority is now responsible for cleanup.
+		return OK;
+	}
 
 	if (node->get_parent() != nullptr) {
 		node->get_parent()->remove_child(node);

@@ -97,6 +97,31 @@ PackedStringArray MultiplayerSpawner::get_configuration_warnings() const {
 	return warnings;
 }
 
+void MultiplayerSpawner::add_visibility_filter(Callable p_callback) {
+	visibility_filters.insert(p_callback);
+}
+
+void MultiplayerSpawner::remove_visibility_filter(Callable p_callback) {
+	visibility_filters.erase(p_callback);
+}
+
+bool MultiplayerSpawner::is_visible_to(int p_peer) const {
+	if (visibility_filters.size()) {
+		Variant arg = p_peer;
+		const Variant *argv[1] = { &arg };
+		for (const Callable &filter : visibility_filters) {
+			Variant ret;
+			Callable::CallError err;
+			filter.callp(argv, 1, ret, err);
+			ERR_FAIL_COND_V(err.error != Callable::CallError::CALL_OK || ret.get_type() != Variant::BOOL, false);
+			if (!ret.operator bool()) {
+				return false;
+			}
+		}
+	}
+	return true;
+}
+
 void MultiplayerSpawner::add_spawnable_scene(const String &p_path) {
 	SpawnableScene sc;
 	sc.path = ResourceUID::ensure_path(p_path);
@@ -177,6 +202,9 @@ void MultiplayerSpawner::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("get_spawn_function"), &MultiplayerSpawner::get_spawn_function);
 	ClassDB::bind_method(D_METHOD("set_spawn_function", "spawn_function"), &MultiplayerSpawner::set_spawn_function);
 	ADD_PROPERTY(PropertyInfo(Variant::CALLABLE, "spawn_function", PROPERTY_HINT_NONE, "", PROPERTY_USAGE_NONE), "set_spawn_function", "get_spawn_function");
+
+	ClassDB::bind_method(D_METHOD("add_visibility_filter", "filter"), &MultiplayerSpawner::add_visibility_filter);
+	ClassDB::bind_method(D_METHOD("remove_visibility_filter", "filter"), &MultiplayerSpawner::remove_visibility_filter);
 
 	ADD_SIGNAL(MethodInfo("despawned", PropertyInfo(Variant::OBJECT, "node", PROPERTY_HINT_RESOURCE_TYPE, Node::get_class_static())));
 	ADD_SIGNAL(MethodInfo("spawned", PropertyInfo(Variant::OBJECT, "node", PROPERTY_HINT_RESOURCE_TYPE, Node::get_class_static())));
