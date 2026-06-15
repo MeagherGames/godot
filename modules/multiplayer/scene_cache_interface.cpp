@@ -114,8 +114,12 @@ void SceneCacheInterface::process_simplify_path(int p_from, const uint8_t *p_pac
 
 	const NodePath path = paths;
 
+	if (!root_node->has_node(path)) {
+		// Node was removed between path cache request and receipt (e.g., despawned
+		// due to visibility/authority change). Silently skip.
+		return;
+	}
 	Node *node = root_node->get_node(path);
-	ERR_FAIL_NULL(node);
 	const bool valid_rpc_checksum = multiplayer->get_rpc_md5(node) == methods_md5;
 	if (valid_rpc_checksum == false) {
 		ERR_PRINT("The rpc node checksum failed. Make sure to have the same methods on both nodes. Node path: " + String(path));

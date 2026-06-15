@@ -667,8 +667,10 @@ Error SceneReplicationInterface::on_spawn_receive(int p_from, const uint8_t *p_b
 	pending_buffer = nullptr;
 	pending_buffer_size = 0;
 	if (pending_sync_net_ids.size()) {
+		// Some synchronizers' authority may have changed during add_child (e.g., in _ready
+		// triggered by peer connection). Their leftover net IDs are stale; they'll get new
+		// ones from their new authority peer.
 		pending_sync_net_ids.clear();
-		ERR_FAIL_V(ERR_INVALID_DATA); // Should have been consumed.
 	}
 	return OK;
 }
