@@ -310,7 +310,12 @@ void SceneReplicationInterface::_visibility_changed(int p_peer, ObjectID p_sid) 
 	ERR_FAIL_NULL(node); // Bug.
 	const ObjectID oid = node->get_instance_id();
 	if (spawned_nodes.has(oid) && p_peer != multiplayer->get_unique_id()) {
-		_update_spawn_visibility(p_peer, oid);
+		if (tracked_nodes.has(oid)) {
+			MultiplayerSpawner *spawner = get_id_as<MultiplayerSpawner>(tracked_nodes[oid].spawner);
+			if (spawner && _has_authority(spawner)) {
+				_update_spawn_visibility(p_peer, oid);
+			}
+		}
 	}
 	_update_sync_visibility(p_peer, sync);
 }
@@ -593,7 +598,9 @@ Error SceneReplicationInterface::on_spawn_receive(int p_from, const uint8_t *p_b
 	ofs += 4;
 	MultiplayerSpawner *spawner = Object::cast_to<MultiplayerSpawner>(multiplayer_cache->get_cached_object(p_from, node_target));
 	ERR_FAIL_NULL_V(spawner, ERR_DOES_NOT_EXIST);
-	ERR_FAIL_COND_V(p_from != spawner->get_multiplayer_authority(), ERR_UNAUTHORIZED);
+	if (p_from != spawner->get_multiplayer_authority()) {
+		return ERR_UNAUTHORIZED;
+	}
 
 	uint32_t net_id = decode_uint32(&p_buffer[ofs]);
 	ofs += 4;
