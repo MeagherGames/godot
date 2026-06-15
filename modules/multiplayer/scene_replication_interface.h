@@ -126,6 +126,7 @@ public:
 
 	void on_reset();
 	void on_peer_change(int p_id, bool p_connected);
+	void on_peer_visibility_changed(int p_peer);
 
 	Error on_spawn(Object *p_obj, Variant p_config);
 	Error on_despawn(Object *p_obj, Variant p_config);

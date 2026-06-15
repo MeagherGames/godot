@@ -79,8 +79,6 @@ void SceneReplicationInterface::_untrack(const ObjectID &p_id) {
 	}
 }
 
-
-
 void SceneReplicationInterface::_stop_node_replication(const ObjectID &p_oid) {
 	if (!tracked_nodes.has(p_oid)) {
 		return;
@@ -121,6 +119,23 @@ void SceneReplicationInterface::on_peer_change(int p_id, bool p_connected) {
 	} else {
 		ERR_FAIL_COND(!peers_info.has(p_id));
 		peers_info.erase(p_id);
+	}
+}
+
+void SceneReplicationInterface::on_peer_visibility_changed(int p_peer) {
+	for (const ObjectID &oid : spawned_nodes) {
+		if (tracked_nodes.has(oid)) {
+			MultiplayerSpawner *spawner = get_id_as<MultiplayerSpawner>(tracked_nodes[oid].spawner);
+			if (spawner && _has_authority(spawner)) {
+				_update_spawn_visibility(p_peer, oid);
+			}
+		}
+	}
+	for (const ObjectID &oid : sync_nodes) {
+		MultiplayerSynchronizer *sync = get_id_as<MultiplayerSynchronizer>(oid);
+		if (sync && _has_authority(sync)) {
+			_update_sync_visibility(p_peer, sync);
+		}
 	}
 }
 

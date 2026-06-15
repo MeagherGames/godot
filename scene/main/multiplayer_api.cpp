@@ -377,6 +377,12 @@ Error MultiplayerAPIExtension::object_configuration_remove(Object *p_object, Var
 	return err;
 }
 
+bool MultiplayerAPIExtension::is_peer_visible(int p_peer) const {
+	bool ret = true;
+	GDVIRTUAL_CALL(_is_peer_visible, p_peer, ret);
+	return ret;
+}
+
 void MultiplayerAPIExtension::_bind_methods() {
 	GDVIRTUAL_BIND(_poll);
 	GDVIRTUAL_BIND(_set_multiplayer_peer, "multiplayer_peer");
@@ -387,4 +393,5 @@ void MultiplayerAPIExtension::_bind_methods() {
 	GDVIRTUAL_BIND(_get_remote_sender_id);
 	GDVIRTUAL_BIND(_object_configuration_add, "object", "configuration");
 	GDVIRTUAL_BIND(_object_configuration_remove, "object", "configuration");
+	GDVIRTUAL_BIND(_is_peer_visible, "peer");
 }

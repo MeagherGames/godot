@@ -74,6 +74,8 @@ public:
 	bool has_multiplayer_peer() { return get_multiplayer_peer().is_valid(); }
 	bool is_server() { return get_unique_id() == MultiplayerPeer::TARGET_PEER_SERVER; }
 
+	virtual bool is_peer_visible(int p_peer) const { return true; }
+
 	virtual ~MultiplayerAPI() {}
 };
 
@@ -98,6 +100,8 @@ public:
 	virtual Error object_configuration_add(Object *p_object, Variant p_config) override;
 	virtual Error object_configuration_remove(Object *p_object, Variant p_config) override;
 
+	virtual bool is_peer_visible(int p_peer) const override;
+
 	// Extensions
 	GDVIRTUAL0R(Error, _poll);
 	GDVIRTUAL1(_set_multiplayer_peer, Ref<MultiplayerPeer>);
@@ -108,4 +112,5 @@ public:
 	GDVIRTUAL0RC(int, _get_remote_sender_id);
 	GDVIRTUAL2R(Error, _object_configuration_add, Object *, Variant);
 	GDVIRTUAL2R(Error, _object_configuration_remove, Object *, Variant);
+	GDVIRTUAL1RC(bool, _is_peer_visible, int);
 };

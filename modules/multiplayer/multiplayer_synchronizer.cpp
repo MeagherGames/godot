@@ -192,6 +192,12 @@ void MultiplayerSynchronizer::set_visibility_public(bool p_visible) {
 }
 
 bool MultiplayerSynchronizer::is_visible_to(int p_peer) {
+	if (p_peer) {
+		Ref<MultiplayerAPI> mp = get_multiplayer();
+		if (mp.is_valid() && !mp->is_peer_visible(p_peer)) {
+			return false;
+		}
+	}
 	if (visibility_filters.size()) {
 		Variant arg = p_peer;
 		const Variant *argv[1] = { &arg };
