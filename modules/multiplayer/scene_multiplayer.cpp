@@ -563,6 +563,38 @@ Vector<int> SceneMultiplayer::get_authenticating_peer_ids() {
 	return out;
 }
 
+void SceneMultiplayer::set_peer_visible(int p_peer, bool p_visible) {
+	if (visible_peers.has(p_peer) == p_visible) {
+		return;
+	}
+	if (p_visible) {
+		visible_peers.insert(p_peer);
+	} else {
+		visible_peers.erase(p_peer);
+	}
+	if (replicator.is_valid()) {
+		replicator->on_peer_visibility_changed(p_peer);
+	}
+}
+
+bool SceneMultiplayer::is_peer_visible(int p_peer) const {
+	return visible_peers.has(p_peer);
+}
+
+Vector<int> SceneMultiplayer::get_visible_peers() const {
+	Vector<int> ret;
+	for (const int &E : connected_peers) {
+		if (visible_peers.has(E)) {
+			ret.push_back(E);
+		}
+	}
+	return ret;
+}
+
+void SceneMultiplayer::clear_visible_peers() {
+	visible_peers.clear();
+}
+
 void SceneMultiplayer::set_allow_object_decoding(bool p_enable) {
 	allow_object_decoding = p_enable;
 }
@@ -658,6 +690,11 @@ void SceneMultiplayer::_bind_methods() {
 	ClassDB::bind_method(D_METHOD("set_server_relay_enabled", "enabled"), &SceneMultiplayer::set_server_relay_enabled);
 	ClassDB::bind_method(D_METHOD("is_server_relay_enabled"), &SceneMultiplayer::is_server_relay_enabled);
 	ClassDB::bind_method(D_METHOD("send_bytes", "bytes", "id", "mode", "channel"), &SceneMultiplayer::send_bytes, DEFVAL(MultiplayerPeer::TARGET_PEER_BROADCAST), DEFVAL(MultiplayerPeer::TRANSFER_MODE_RELIABLE), DEFVAL(0));
+
+	ClassDB::bind_method(D_METHOD("set_peer_visible", "peer", "visible"), &SceneMultiplayer::set_peer_visible);
+	ClassDB::bind_method(D_METHOD("is_peer_visible", "peer"), &SceneMultiplayer::is_peer_visible);
+	ClassDB::bind_method(D_METHOD("get_visible_peers"), &SceneMultiplayer::get_visible_peers);
+	ClassDB::bind_method(D_METHOD("clear_visible_peers"), &SceneMultiplayer::clear_visible_peers);
 
 	ClassDB::bind_method(D_METHOD("get_max_sync_packet_size"), &SceneMultiplayer::get_max_sync_packet_size);
 	ClassDB::bind_method(D_METHOD("set_max_sync_packet_size", "size"), &SceneMultiplayer::set_max_sync_packet_size);

@@ -110,7 +110,7 @@ private:
 	void _visibility_changed(int p_peer, ObjectID p_oid);
 	Error _update_sync_visibility(int p_peer, MultiplayerSynchronizer *p_sync);
 	Error _update_spawn_visibility(int p_peer, const ObjectID &p_oid);
-	void _free_remotes(const PeerInfo &p_info);
+	void _stop_node_replication(const ObjectID &p_oid);
 
 	template <typename T>
 	static T *get_id_as(const ObjectID &p_id) {
@@ -126,6 +126,7 @@ public:
 
 	void on_reset();
 	void on_peer_change(int p_id, bool p_connected);
+	void on_peer_visibility_changed(int p_peer);
 
 	Error on_spawn(Object *p_obj, Variant p_config);
 	Error on_despawn(Object *p_obj, Variant p_config);

@@ -63,6 +63,8 @@ private:
 		SpawnInfo() {}
 	};
 
+	HashSet<Callable> visibility_filters;
+
 	ObjectID spawn_node;
 	HashMap<ObjectID, SpawnInfo> tracked_nodes;
 	uint32_t spawn_limit = 0;
@@ -92,6 +94,10 @@ public:
 	Node *get_spawn_node() const {
 		return spawn_node.is_valid() ? ObjectDB::get_instance<Node>(spawn_node) : nullptr;
 	}
+
+	void add_visibility_filter(Callable p_callback);
+	void remove_visibility_filter(Callable p_callback);
+	bool is_visible_to(int p_peer) const;
 
 	void add_spawnable_scene(const String &p_path);
 	int get_spawnable_scene_count() const;

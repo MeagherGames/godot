@@ -113,6 +113,7 @@ private:
 	Callable auth_callback;
 	uint64_t auth_timeout = 3000;
 	HashSet<int> connected_peers;
+	HashSet<int> visible_peers;
 	int remote_sender_id = 0;
 	int remote_sender_override = 0;
 
@@ -177,6 +178,11 @@ public:
 	void set_auth_timeout(double p_timeout);
 	double get_auth_timeout() const;
 	Vector<int> get_authenticating_peer_ids();
+
+	void set_peer_visible(int p_peer, bool p_visible);
+	virtual bool is_peer_visible(int p_peer) const override;
+	Vector<int> get_visible_peers() const;
+	void clear_visible_peers();
 
 	Error send_command(int p_to, const uint8_t *p_packet, int p_packet_len); // Used internally to relay packets when needed.
 	Error send_bytes(Vector<uint8_t> p_data, int p_to = MultiplayerPeer::TARGET_PEER_BROADCAST, MultiplayerPeer::TransferMode p_mode = MultiplayerPeer::TRANSFER_MODE_RELIABLE, int p_channel = 0);

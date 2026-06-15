@@ -79,11 +79,27 @@ void SceneReplicationInterface::_untrack(const ObjectID &p_id) {
 	}
 }
 
-void SceneReplicationInterface::_free_remotes(const PeerInfo &p_info) {
-	for (const KeyValue<uint32_t, ObjectID> &E : p_info.recv_nodes) {
-		Node *node = tracked_nodes.has(E.value) ? get_id_as<Node>(E.value) : nullptr;
-		ERR_CONTINUE(!node);
-		node->queue_free();
+void SceneReplicationInterface::_stop_node_replication(const ObjectID &p_oid) {
+	if (!tracked_nodes.has(p_oid)) {
+		return;
+	}
+	TrackedNode &tnode = tracked_nodes[p_oid];
+	// Copy the set because we modify it during iteration.
+	HashSet<ObjectID> syncs(tnode.synchronizers);
+	for (const ObjectID &sid : syncs) {
+		MultiplayerSynchronizer *sync = get_id_as<MultiplayerSynchronizer>(sid);
+		if (!sync) {
+			continue;
+		}
+		sync_nodes.erase(sid);
+		for (KeyValue<int, PeerInfo> &E : peers_info) {
+			E.value.sync_nodes.erase(sid);
+			E.value.last_watch_usecs.erase(sid);
+			if (sync->get_net_id()) {
+				E.value.recv_sync_ids.erase(sync->get_net_id());
+			}
+		}
+		tnode.synchronizers.erase(sid);
 	}
 }
 
@@ -102,15 +118,28 @@ void SceneReplicationInterface::on_peer_change(int p_id, bool p_connected) {
 		}
 	} else {
 		ERR_FAIL_COND(!peers_info.has(p_id));
-		_free_remotes(peers_info[p_id]);
 		peers_info.erase(p_id);
 	}
 }
 
-void SceneReplicationInterface::on_reset() {
-	for (const KeyValue<int, PeerInfo> &E : peers_info) {
-		_free_remotes(E.value);
+void SceneReplicationInterface::on_peer_visibility_changed(int p_peer) {
+	for (const ObjectID &oid : spawned_nodes) {
+		if (tracked_nodes.has(oid)) {
+			MultiplayerSpawner *spawner = get_id_as<MultiplayerSpawner>(tracked_nodes[oid].spawner);
+			if (spawner && _has_authority(spawner)) {
+				_update_spawn_visibility(p_peer, oid);
+			}
+		}
 	}
+	for (const ObjectID &oid : sync_nodes) {
+		MultiplayerSynchronizer *sync = get_id_as<MultiplayerSynchronizer>(oid);
+		if (sync && _has_authority(sync)) {
+			_update_sync_visibility(p_peer, sync);
+		}
+	}
+}
+
+void SceneReplicationInterface::on_reset() {
 	peers_info.clear();
 	// Tracked nodes are cleared on deletion, here we only reset the ids so they can be later re-assigned.
 	for (KeyValue<ObjectID, TrackedNode> &E : tracked_nodes) {
@@ -296,7 +325,12 @@ void SceneReplicationInterface::_visibility_changed(int p_peer, ObjectID p_sid) 
 	ERR_FAIL_NULL(node); // Bug.
 	const ObjectID oid = node->get_instance_id();
 	if (spawned_nodes.has(oid) && p_peer != multiplayer->get_unique_id()) {
-		_update_spawn_visibility(p_peer, oid);
+		if (tracked_nodes.has(oid)) {
+			MultiplayerSpawner *spawner = get_id_as<MultiplayerSpawner>(tracked_nodes[oid].spawner);
+			if (spawner && _has_authority(spawner)) {
+				_update_spawn_visibility(p_peer, oid);
+			}
+		}
 	}
 	_update_sync_visibility(p_peer, sync);
 }
@@ -401,6 +435,10 @@ Error SceneReplicationInterface::_update_spawn_visibility(int p_peer, const Obje
 			break;
 		}
 		is_visible = false;
+	}
+	// Also check spawner-level visibility filter (AND with synchronizer result).
+	if (is_visible) {
+		is_visible = spawner->is_visible_to(p_peer);
 	}
 	// Spawn (and despawn) when needed.
 	HashSet<int> to_spawn;
@@ -575,7 +613,9 @@ Error SceneReplicationInterface::on_spawn_receive(int p_from, const uint8_t *p_b
 	ofs += 4;
 	MultiplayerSpawner *spawner = Object::cast_to<MultiplayerSpawner>(multiplayer_cache->get_cached_object(p_from, node_target));
 	ERR_FAIL_NULL_V(spawner, ERR_DOES_NOT_EXIST);
-	ERR_FAIL_COND_V(p_from != spawner->get_multiplayer_authority(), ERR_UNAUTHORIZED);
+	if (p_from != spawner->get_multiplayer_authority()) {
+		return ERR_UNAUTHORIZED;
+	}
 
 	uint32_t net_id = decode_uint32(&p_buffer[ofs]);
 	ofs += 4;
@@ -599,7 +639,11 @@ Error SceneReplicationInterface::on_spawn_receive(int p_from, const uint8_t *p_b
 	// Check that we can spawn.
 	Node *parent = spawner->get_node_or_null(spawner->get_spawn_path());
 	ERR_FAIL_NULL_V(parent, ERR_UNCONFIGURED);
-	ERR_FAIL_COND_V(parent->has_node(name), ERR_INVALID_DATA);
+	// Node with this name already exists (e.g., preserved through scene cleanup).
+	// Silently skip — the node is already on this peer with its state intact.
+	if (parent->has_node(name)) {
+		return OK;
+	}
 
 	Node *node = nullptr;
 	if (scene_id == MultiplayerSpawner::INVALID_ID) {
@@ -645,8 +689,10 @@ Error SceneReplicationInterface::on_spawn_receive(int p_from, const uint8_t *p_b
 	pending_buffer = nullptr;
 	pending_buffer_size = 0;
 	if (pending_sync_net_ids.size()) {
+		// Some synchronizers' authority may have changed during add_child (e.g., in _ready
+		// triggered by peer connection). Their leftover net IDs are stale; they'll get new
+		// ones from their new authority peer.
 		pending_sync_net_ids.clear();
-		ERR_FAIL_V(ERR_INVALID_DATA); // Should have been consumed.
 	}
 	return OK;
 }
@@ -658,19 +704,39 @@ Error SceneReplicationInterface::on_despawn_receive(int p_from, const uint8_t *p
 	ofs += 4;
 
 	// Untrack remote
-	ERR_FAIL_COND_V(!peers_info.has(p_from), ERR_UNAUTHORIZED);
+	if (!peers_info.has(p_from)) {
+		// The peer is already gone (e.g., disconnected). Nothing to despawn.
+		return OK;
+	}
 	PeerInfo &pinfo = peers_info[p_from];
-	ERR_FAIL_COND_V(!pinfo.recv_nodes.has(net_id), ERR_UNAUTHORIZED);
+	if (!pinfo.recv_nodes.has(net_id)) {
+		// The node was already despawned or never spawned. This can happen
+		// when a visibility change or a despawn is received for a node that
+		// was never visible to this peer. No-op is safe here.
+		return OK;
+	}
 	Node *node = get_id_as<Node>(pinfo.recv_nodes[net_id]);
 	ERR_FAIL_NULL_V(node, ERR_BUG);
 	pinfo.recv_nodes.erase(net_id);
 
 	const ObjectID oid = node->get_instance_id();
 	ERR_FAIL_COND_V(!tracked_nodes.has(oid), ERR_BUG);
-	MultiplayerSpawner *spawner = get_id_as<MultiplayerSpawner>(tracked_nodes[oid].spawner);
-	ERR_FAIL_NULL_V(spawner, ERR_DOES_NOT_EXIST);
-	ERR_FAIL_COND_V(p_from != spawner->get_multiplayer_authority(), ERR_UNAUTHORIZED);
 
+	MultiplayerSpawner *spawner = get_id_as<MultiplayerSpawner>(tracked_nodes[oid].spawner);
+	if (!spawner) {
+		// Spawner is gone (e.g., the scene was freed). Stop replication
+		// and let the project handle cleanup.
+		_stop_node_replication(oid);
+		return OK;
+	}
+	if (p_from != spawner->get_multiplayer_authority()) {
+		// Despawn from a former authority (authority has since changed).
+		// The node's current authority is now responsible for management.
+		// Keep the node fully tracked — don't stop replication.
+		return OK;
+	}
+
+	_stop_node_replication(oid);
 	if (node->get_parent() != nullptr) {
 		node->get_parent()->remove_child(node);
 	}
